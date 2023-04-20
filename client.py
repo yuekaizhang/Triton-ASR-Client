@@ -515,6 +515,7 @@ async def main():
             )
         dps = load_manifests(args.manifest_dir)
         dps_list = split_data(dps, args.num_tasks)
+        args.num_tasks = min(args.num_tasks, len(dps_list))
 
     url = f"{args.server_addr}:{args.server_port}"
 
