@@ -1,0 +1,4 @@
+RTF: 0.0022
+total_duration: 32590.000 seconds
+(9.05 hours)
+processing time: 71.307 seconds (0.02 hours)
