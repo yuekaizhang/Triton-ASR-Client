@@ -1,0 +1,4 @@
+kaldialign
+tritonclient
+soundfile
+numpy
