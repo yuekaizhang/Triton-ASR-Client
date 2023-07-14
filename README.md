@@ -54,7 +54,9 @@ client.py [-h] [--server-addr SERVER_ADDR] [--server-port SERVER_PORT]
 | [Conformer Tensorrt](https://github.com/wenet-e2e/wenet/tree/main/runtime/gpu/tensorrt/model_repo_stateful_trt) |Streaming ASR Tensorrt FP16 |Wenet |  |
 | [Conformer FasterTransformer](https://github.com/wenet-e2e/wenet/tree/main/runtime/gpu/tensorrt_fastertransformer/model_repo_ft) | Offline ASR FasterTransformer FP16|Wenet |  |
 | [Conformer CUDA-TLG decoder](https://github.com/wenet-e2e/wenet/tree/main/runtime/gpu/cuda_decoders/model_repo_cuda_decoder) | Offline ASR with CUDA Decoders|Wenet | speechai/model_repo_conformer_aishell_wenet_tlg |
-| [Conformer Onnx](https://github.com/k2-fsa/sherpa/tree/master/triton/model_repo_streaming) | Streaming ASR Onnx FP16 |k2 | |
+| [Offline Conformer Onnx](https://github.com/k2-fsa/sherpa/tree/master/triton/model_repo_offline) | Offline ASR Onnx FP16 |k2 |wd929/k2_conformer_offline_onnx_model_repo
+| [Offline Conformer TensorRT](https://github.com/k2-fsa/sherpa/tree/master/triton/model_repo_offline) | Offline ASR TensorRT FP16 |k2 |wd929/k2_conformer_offline_trt_model_repo |
+| [Streaming Conformer Onnx](https://github.com/k2-fsa/sherpa/tree/master/triton/model_repo_streaming) | Streaming ASR Onnx FP16 |k2 | |
 | [Zipformer Onnx](https://github.com/k2-fsa/sherpa/tree/master/triton/zipformer/model_repo_offline_bs) | Offline ASR Onnx FP16 with Blank Skip |k2 | |
 | [Paraformer Onnx](https://github.com/alibaba-damo-academy/FunASR/tree/main/funasr/runtime/triton_gpu/model_repo_paraformer_large_offline) | Offline ASR FP32 |FunASR | |
 
