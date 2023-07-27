@@ -1,4 +1,4 @@
 kaldialign
-tritonclient
+tritonclient[grpc]==2.31
 soundfile
 numpy

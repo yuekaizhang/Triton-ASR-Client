@@ -253,7 +253,7 @@ def write_triton_stats(stats, summary_file):
 
 def download_and_extract(
     target_path: str,
-    url: str = "https://huggingface.co/csukuangfj/aishell-test-dev-manifests/reslove/main/data_aishell.tar.gz",
+    url: str = "https://huggingface.co/csukuangfj/aishell-test-dev-manifests/resolve/main/data_aishell.tar.gz",
 ):
     filename = url.split("/")[-1]
 
