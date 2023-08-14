@@ -69,6 +69,14 @@ python3 client.py \
     --model-name infer_pipeline \
     --num-tasks $num_task \
     --manifest-dir ./datasets/aishell1_test
+
+# For offlien whisper server
+python3 client.py \
+    --server-addr localhost \
+    --model-name whisper \
+    --num-tasks $num_task \
+    --whisper-prompt "<|startoftranscript|><|en|><|transcribe|><|notimestamps|>" \
+    --manifest-dir ./datasets/mini_en
 """
 
 import argparse
@@ -129,6 +137,13 @@ def get_args():
     )
 
     parser.add_argument(
+        "--whisper-prompt",
+        type=str,
+        default="<|startoftranscript|><|en|><|transcribe|><|notimestamps|>",
+        help="e.g. <|startofprev|>My hot words<|startoftranscript|><|en|><|transcribe|><|notimestamps|>, please check https://arxiv.org/pdf/2305.11095.pdf also.",
+    )
+
+    parser.add_argument(
         "--model-name",
         type=str,
         default="transducer",
@@ -137,6 +152,7 @@ def get_args():
             "attention_rescoring",
             "streaming_wenet",
             "infer_pipeline",
+            "whisper"
         ],
         help="triton model_repo module name to request: transducer for k2, attention_rescoring for wenet offline, streaming_wenet for wenet streaming, infer_pipeline for paraformer large offline",
     )
@@ -493,6 +509,87 @@ async def send_streaming(
 
     return total_duration, results, latency_data
 
+async def send_whisper(
+    dps: list,
+    name: str,
+    triton_client: tritonclient.grpc.aio.InferenceServerClient,
+    protocol_client: types.ModuleType,
+    log_interval: int,
+    compute_cer: bool,
+    model_name: str,
+    padding_duration: int = 10,
+    whisper_prompt: str = "<|startoftranscript|><|en|><|transcribe|><|notimestamps|>",
+):
+    total_duration = 0.0
+    results = []
+    task_id = int(name[5:])
+    for i, dp in enumerate(dps):
+        if i % log_interval == 0:
+            print(f"{name}: {i}/{len(dps)}")
+
+        waveform, sample_rate = load_audio(dp["audio_filepath"])
+        duration = int(len(waveform) / sample_rate)
+
+        # padding to nearset 10 seconds
+        samples = np.zeros(
+            (
+                1,
+                padding_duration * sample_rate * ((duration // padding_duration) + 1),
+            ),
+            dtype=np.float32,
+        )
+
+        samples[0, : len(waveform)] = waveform
+
+        lengths = np.array([[len(waveform)]], dtype=np.int32)
+
+        inputs = [
+            protocol_client.InferInput(
+                "WAV", samples.shape, np_to_triton_dtype(samples.dtype)
+            ),
+            protocol_client.InferInput(
+                "TEXT_PREFIX", [1, 1], "BYTES"
+            ),
+        ]
+        inputs[0].set_data_from_numpy(samples)
+        
+        input_data_numpy = np.array([whisper_prompt], dtype=object)
+        input_data_numpy = input_data_numpy.reshape((1, 1))
+        inputs[1].set_data_from_numpy(input_data_numpy)
+        
+        outputs = [protocol_client.InferRequestedOutput("TRANSCRIPTS")]
+        sequence_id = 100000000 + i + task_id * 10
+
+        response = await triton_client.infer(
+            model_name, inputs, request_id=str(sequence_id), outputs=outputs
+        )
+
+        decoding_results = response.as_numpy("TRANSCRIPTS")[0]
+        if type(decoding_results) == np.ndarray:
+            decoding_results = b" ".join(decoding_results).decode("utf-8")
+        else:
+            # For wenet
+            decoding_results = decoding_results.decode("utf-8")
+
+        total_duration += duration
+
+        if compute_cer:
+            ref = dp["text"].split()
+            hyp = decoding_results.split()
+            ref = list("".join(ref))
+            hyp = list("".join(hyp))
+            results.append((dp["id"], ref, hyp))
+        else:
+            results.append(
+                (
+                    dp["id"],
+                    dp["text"].split(),
+                    decoding_results.split(),
+                )
+            )
+        print(results[-1])
+
+    return total_duration, results
 
 async def main():
     args = get_args()
@@ -582,17 +679,31 @@ async def main():
                 )
             )
         else:
-            task = asyncio.create_task(
-                send(
-                    dps=dps_list[i],
-                    name=f"task-{i}",
-                    triton_client=triton_client,
-                    protocol_client=protocol_client,
-                    log_interval=args.log_interval,
-                    compute_cer=args.compute_cer,
-                    model_name=args.model_name,
+            if args.model_name == "whisper":
+                task = asyncio.create_task(
+                    send_whisper(
+                        dps=dps_list[i],
+                        name=f"task-{i}",
+                        triton_client=triton_client,
+                        protocol_client=protocol_client,
+                        log_interval=args.log_interval,
+                        compute_cer=args.compute_cer,
+                        model_name=args.model_name,
+                        whisper_prompt=args.whisper_prompt,
+                    )
                 )
-            )
+            else:
+                task = asyncio.create_task(
+                    send(
+                        dps=dps_list[i],
+                        name=f"task-{i}",
+                        triton_client=triton_client,
+                        protocol_client=protocol_client,
+                        log_interval=args.log_interval,
+                        compute_cer=args.compute_cer,
+                        model_name=args.model_name,
+                    )
+                )
         tasks.append(task)
 
     ans_list = await asyncio.gather(*tasks)
