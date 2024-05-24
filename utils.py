@@ -211,6 +211,29 @@ def write_error_stats(
 def write_triton_stats(stats, summary_file):
     with open(summary_file, "w") as summary_f:
         model_stats = stats["model_stats"]
+        # write a note, the log is from triton_client.get_inference_statistics(), to better human readability
+        summary_f.write(
+            "The log is parsing from triton_client.get_inference_statistics(), to better human readability. \n"
+        )
+        summary_f.write("To learn more about the log, please refer to: \n")
+        summary_f.write(
+            "1. https://github.com/triton-inference-server/server/blob/main/docs/user_guide/metrics.md \n"
+        )
+        summary_f.write(
+            "2. https://github.com/triton-inference-server/server/issues/5374 \n\n"
+        )
+        summary_f.write(
+            "To better improve throughput, we always would like let requests wait in the queue for a while, and then execute them with a larger batch size. \n"
+        )
+        summary_f.write(
+            "However, there is a trade-off between the increased queue time and the increased batch size. \n"
+        )
+        summary_f.write(
+            "You may change 'max_queue_delay_microseconds' and 'preferred_batch_size' in the model configuration file to achieve this. \n"
+        )
+        summary_f.write(
+            "See https://github.com/triton-inference-server/server/blob/main/docs/user_guide/model_configuration.md#delayed-batching for more details. \n\n"
+        )
         for model_state in model_stats:
             if "last_inference" not in model_state:
                 continue
@@ -223,7 +246,7 @@ def write_triton_stats(stats, summary_file):
                 int(model_inference_stats["compute_output"]["ns"]) / 1e9
             )
             summary_f.write(
-                f"queue {total_queue_time_s:<5.2f} s, infer {total_infer_time_s:<5.2f} s, input {total_input_time_s:<5.2f} s, output {total_output_time_s:<5.2f} s \n"  # noqa
+                f"queue time {total_queue_time_s:<5.2f} s, compute infer time {total_infer_time_s:<5.2f} s, compute input time {total_input_time_s:<5.2f} s, compute output time {total_output_time_s:<5.2f} s \n"  # noqa
             )
             model_batch_stats = model_state["batch_stats"]
             for batch in model_batch_stats:
@@ -241,14 +264,14 @@ def write_triton_stats(stats, summary_file):
                 compute_input_time_ms = int(compute_input["ns"]) / 1e6
                 compute_output_time_ms = int(compute_output["ns"]) / 1e6
                 summary_f.write(
-                    f"Batch_size {batch_size:<2}, {batch_count:<5} times, infer {compute_infer_time_ms:<9.2f} ms, avg {compute_infer_time_ms/batch_count:.2f} ms, {compute_infer_time_ms/batch_count/batch_size:.2f} ms "  # noqa
+                    f"execuate inference with batch_size {batch_size:<2} total {batch_count:<5} times, total_infer_time {compute_infer_time_ms:<9.2f} ms, avg_infer_time {compute_infer_time_ms:<9.2f}/{batch_count:<5}={compute_infer_time_ms/batch_count:.2f} ms, avg_infer_time_per_sample {compute_infer_time_ms:<9.2f}/{batch_count:<5}/{batch_size}={compute_infer_time_ms/batch_count/batch_size:.2f} ms \n"  # noqa
                 )
-                summary_f.write(
-                    f"input {compute_input_time_ms:<9.2f} ms, avg {compute_input_time_ms/batch_count:.2f} ms, "  # noqa
-                )
-                summary_f.write(
-                    f"output {compute_output_time_ms:<9.2f} ms, avg {compute_output_time_ms/batch_count:.2f} ms \n"  # noqa
-                )
+                # summary_f.write(
+                #     f"input {compute_input_time_ms:<9.2f} ms, avg {compute_input_time_ms/batch_count:.2f} ms, "  # noqa
+                # )
+                # summary_f.write(
+                #     f"output {compute_output_time_ms:<9.2f} ms, avg {compute_output_time_ms/batch_count:.2f} ms \n"  # noqa
+                # )
 
 
 def download_and_extract(

@@ -1,0 +1,21 @@
+%WER = 100.00
+Errors: 0 insertions, 0 deletions, 2 substitutions, over 2 reference words (0 correct)
+Search below for sections starting with PER-UTT DETAILS:, SUBSTITUTIONS:, DELETIONS:, INSERTIONS:, PER-WORD STATS:
+
+PER-UTT DETAILS: corr or (ref->hyp)  
+wav_0:	(大学生利用漏洞免费吃肯德基获刑->大学生利用漏洞免费吃肯德基获行)
+wav_1:	(富士康在印度工厂出现大规模感染目前工厂产量已下降超百->路士康在印度工厂出现大规模感染,目前工厂产量已下降超50%。)
+
+SUBSTITUTIONS: count ref -> hyp
+1   富士康在印度工厂出现大规模感染目前工厂产量已下降超百 -> 路士康在印度工厂出现大规模感染,目前工厂产量已下降超50%。
+1   大学生利用漏洞免费吃肯德基获刑 -> 大学生利用漏洞免费吃肯德基获行
+
+DELETIONS: count ref
+
+INSERTIONS: count hyp
+
+PER-WORD STATS: word  corr tot_errs count_in_ref count_in_hyp
+路士康在印度工厂出现大规模感染,目前工厂产量已下降超50%。   0 1 0 1
+富士康在印度工厂出现大规模感染目前工厂产量已下降超百   0 1 1 0
+大学生利用漏洞免费吃肯德基获行   0 1 0 1
+大学生利用漏洞免费吃肯德基获刑   0 1 1 0

@@ -152,7 +152,7 @@ def get_args():
             "attention_rescoring",
             "streaming_wenet",
             "infer_pipeline",
-            "whisper"
+            "whisper",
         ],
         help="triton model_repo module name to request: transducer for k2, attention_rescoring for wenet offline, streaming_wenet for wenet streaming, infer_pipeline for paraformer large offline",
     )
@@ -329,6 +329,7 @@ async def send(
 ):
     total_duration = 0.0
     results = []
+    latency_data = []
 
     for i, dp in enumerate(dps):
         if i % log_interval == 0:
@@ -362,7 +363,7 @@ async def send(
         inputs[1].set_data_from_numpy(lengths)
         outputs = [protocol_client.InferRequestedOutput("TRANSCRIPTS")]
         sequence_id = 10086 + i
-
+        start = time.time()
         response = await triton_client.infer(
             model_name, inputs, request_id=str(sequence_id), outputs=outputs
         )
@@ -373,7 +374,8 @@ async def send(
         else:
             # For wenet
             decoding_results = decoding_results.decode("utf-8")
-
+        end = time.time() - start
+        latency_data.append((end, duration))
         total_duration += duration
 
         if compute_cer:
@@ -391,7 +393,7 @@ async def send(
                 )
             )
 
-    return total_duration, results
+    return total_duration, results, latency_data
 
 
 async def send_streaming(
@@ -509,6 +511,7 @@ async def send_streaming(
 
     return total_duration, results, latency_data
 
+
 async def send_whisper(
     dps: list,
     name: str,
@@ -522,6 +525,7 @@ async def send_whisper(
 ):
     total_duration = 0.0
     results = []
+    latency_data = []
     task_id = int(name[5:])
     for i, dp in enumerate(dps):
         if i % log_interval == 0:
@@ -547,19 +551,17 @@ async def send_whisper(
             protocol_client.InferInput(
                 "WAV", samples.shape, np_to_triton_dtype(samples.dtype)
             ),
-            protocol_client.InferInput(
-                "TEXT_PREFIX", [1, 1], "BYTES"
-            ),
+            protocol_client.InferInput("TEXT_PREFIX", [1, 1], "BYTES"),
         ]
         inputs[0].set_data_from_numpy(samples)
-        
+
         input_data_numpy = np.array([whisper_prompt], dtype=object)
         input_data_numpy = input_data_numpy.reshape((1, 1))
         inputs[1].set_data_from_numpy(input_data_numpy)
-        
+
         outputs = [protocol_client.InferRequestedOutput("TRANSCRIPTS")]
         sequence_id = 100000000 + i + task_id * 10
-
+        start = time.time()
         response = await triton_client.infer(
             model_name, inputs, request_id=str(sequence_id), outputs=outputs
         )
@@ -570,7 +572,8 @@ async def send_whisper(
         else:
             # For wenet
             decoding_results = decoding_results.decode("utf-8")
-
+        end = time.time() - start
+        latency_data.append((end, duration))
         total_duration += duration
 
         if compute_cer:
@@ -589,7 +592,8 @@ async def send_whisper(
             )
         print(results[-1])
 
-    return total_duration, results
+    return total_duration, results, latency_data
+
 
 async def main():
     args = get_args()
@@ -597,11 +601,13 @@ async def main():
         args.num_tasks = 1
         args.log_interval = 1
         dps_list = [
-            [{
-                "audio_filepath": args.audio_path,
-                "text": "foo",
-                "id": 0,
-            }]
+            [
+                {
+                    "audio_filepath": args.audio_path,
+                    "text": "foo",
+                    "id": 0,
+                }
+            ]
         ]
     else:
         if not any(Path(args.manifest_dir).rglob("*.wav")):
@@ -717,8 +723,7 @@ async def main():
     for ans in ans_list:
         total_duration += ans[0]
         results += ans[1]
-        if args.streaming or args.simulate_streaming:
-            latency_data += ans[2]
+        latency_data += ans[2]
 
     rtf = elapsed / total_duration
 
@@ -727,15 +732,15 @@ async def main():
     s += f"({total_duration/3600:.2f} hours)\n"
     s += f"processing time: {elapsed:.3f} seconds " f"({elapsed/3600:.2f} hours)\n"
 
-    if args.streaming or args.simulate_streaming:
-        latency_list = [chunk_end for (chunk_end, chunk_duration) in latency_data]
-        latency_ms = sum(latency_list) / float(len(latency_list)) * 1000.0
-        latency_variance = np.var(latency_list, dtype=np.float64) * 1000.0
-        s += f"latency_variance: {latency_variance:.2f}\n"
-        s += f"latency_50_percentile: {np.percentile(latency_list, 50) * 1000.0:.2f}\n"
-        s += f"latency_90_percentile: {np.percentile(latency_list, 90) * 1000.0:.2f}\n"
-        s += f"latency_99_percentile: {np.percentile(latency_list, 99) * 1000.0:.2f}\n"
-        s += f"average_latency_ms: {latency_ms:.2f}\n"
+    latency_list = [chunk_end for (chunk_end, chunk_duration) in latency_data]
+    latency_ms = sum(latency_list) / float(len(latency_list)) * 1000.0
+    latency_variance = np.var(latency_list, dtype=np.float64) * 1000.0
+    s += f"latency_variance: {latency_variance:.2f}\n"
+    s += f"latency_50_percentile_ms: {np.percentile(latency_list, 50) * 1000.0:.2f}\n"
+    s += f"latency_90_percentile_ms: {np.percentile(latency_list, 90) * 1000.0:.2f}\n"
+    s += f"latency_95_percentile_ms: {np.percentile(latency_list, 95) * 1000.0:.2f}\n"
+    s += f"latency_99_percentile_ms: {np.percentile(latency_list, 99) * 1000.0:.2f}\n"
+    s += f"average_latency_ms: {latency_ms:.2f}\n"
 
     print(s)
 

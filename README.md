@@ -33,7 +33,7 @@ client.py [-h] [--server-addr SERVER_ADDR] [--server-port SERVER_PORT]
 * `--server-port SERVER_PORT`: gRPC port of the triton server, default is 8001 (default: 8001)
 * `--manifest-dir MANIFEST_DIR`: Path to the manifest dir which includes wav.scp trans.txt files. (default: ./datasets/aishell1_test)
 * `--audio-path AUDIO_PATH`: Path to a single audio file. It can't be specified at the same time with --manifest-dir (default: None)
-* `--model-name {transducer,attention_rescoring,streaming_wenet,infer_pipeline}`: Triton model_repo module name to request: transducer for k2, attention_rescoring for wenet offline, streaming_wenet for wenet streaming, infer_pipeline for paraformer large offline (default: transducer)
+* `--model-name {whisper,transducer,attention_rescoring,streaming_wenet,infer_pipeline}`: Triton model_repo module name to request: whisper with TensorRT-LLM, transducer for k2, attention_rescoring for wenet offline, streaming_wenet for wenet streaming, infer_pipeline for paraformer large offline (default: transducer)
 * `--num-tasks NUM_TASKS`: Number of concurrent tasks for sending (default: 50)
 * `--log-interval LOG_INTERVAL`: Controls how frequently we print the log. (default: 5)
 * `--compute-cer`: True to compute CER, e.g., for Chinese. False to compute WER, e.g., for English words. (default: False)
@@ -50,7 +50,7 @@ client.py [-h] [--server-addr SERVER_ADDR] [--server-port SERVER_PORT]
 ### List of Supported Triton ASR Server
 | Model Repo | Description | Source | HuggingFace Link |
 | --- | --- | --- | -- |
-| [Whisper Large-v2 Onnx](https://github.com/openai/whisper/tree/main) | Offline ASR Onnx FP16 |Openai | yuekai/model_repo_whisper_large_v2  |
+| [Whisper Large-v3 TensorRT-LLM](https://github.com/NVIDIA/TensorRT-LLM/tree/main/examples/whisper) | Offline ASR TensorRT-LLM |Openai |   |
 | [Conformer Onnx](https://github.com/wenet-e2e/wenet/tree/main/runtime/gpu/model_repo) | Offline ASR Onnx FP16 |Wenet | yuekai/model_repo_conformer_aishell_wenet  |
 | [Conformer Tensorrt](https://github.com/wenet-e2e/wenet/tree/main/runtime/gpu/tensorrt/model_repo_stateful_trt) |Streaming ASR Tensorrt FP16 |Wenet |  |
 | [Conformer FasterTransformer](https://github.com/wenet-e2e/wenet/tree/main/runtime/gpu/tensorrt_fastertransformer/model_repo_ft) | Offline ASR FasterTransformer FP16|Wenet |  |
@@ -60,5 +60,3 @@ client.py [-h] [--server-addr SERVER_ADDR] [--server-port SERVER_PORT]
 | [Streaming Conformer Onnx](https://github.com/k2-fsa/sherpa/tree/master/triton/model_repo_streaming) | Streaming ASR Onnx FP16 |k2 | |
 | [Zipformer Onnx](https://github.com/k2-fsa/sherpa/tree/master/triton/zipformer/model_repo_offline_bs) | Offline ASR Onnx FP16 with Blank Skip |k2 | |
 | [Paraformer Onnx](https://github.com/alibaba-damo-academy/FunASR/tree/main/funasr/runtime/triton_gpu/model_repo_paraformer_large_offline) | Offline ASR FP32 |FunASR | |
-
-
