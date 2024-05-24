@@ -50,7 +50,7 @@ client.py [-h] [--server-addr SERVER_ADDR] [--server-port SERVER_PORT]
 ### List of Supported Triton ASR Server
 | Model Repo | Description | Source | HuggingFace Link |
 | --- | --- | --- | -- |
-| [Whisper Large-v3 TensorRT-LLM](https://github.com/NVIDIA/TensorRT-LLM/tree/main/examples/whisper) | Offline ASR TensorRT-LLM |Openai |   |
+| [Whisper](https://github.com/k2-fsa/sherpa/tree/master/triton/whisper) | Offline ASR TensorRT-LLM |Openai |   |
 | [Conformer Onnx](https://github.com/wenet-e2e/wenet/tree/main/runtime/gpu/model_repo) | Offline ASR Onnx FP16 |Wenet | yuekai/model_repo_conformer_aishell_wenet  |
 | [Conformer Tensorrt](https://github.com/wenet-e2e/wenet/tree/main/runtime/gpu/tensorrt/model_repo_stateful_trt) |Streaming ASR Tensorrt FP16 |Wenet |  |
 | [Conformer FasterTransformer](https://github.com/wenet-e2e/wenet/tree/main/runtime/gpu/tensorrt_fastertransformer/model_repo_ft) | Offline ASR FasterTransformer FP16|Wenet |  |
