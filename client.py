@@ -77,6 +77,14 @@ python3 client.py \
     --num-tasks $num_task \
     --whisper-prompt "<|startoftranscript|><|en|><|transcribe|><|notimestamps|>" \
     --manifest-dir ./datasets/mini_en
+
+# For offline sensevoice server
+python3 client.py \
+    --server-addr localhost \
+    --server-port 10086 \
+    --model-name sensevoice \
+    --num-tasks $num_task \
+    --manifest-dir ./datasets/mini_zh
 """
 
 import argparse
@@ -84,6 +92,7 @@ import asyncio
 import json
 import math
 import os
+import re
 import time
 import types
 from pathlib import Path
@@ -153,6 +162,7 @@ def get_args():
             "streaming_wenet",
             "infer_pipeline",
             "whisper",
+            "sensevoice",
         ],
         help="triton model_repo module name to request: transducer for k2, attention_rescoring for wenet offline, streaming_wenet for wenet streaming, infer_pipeline for paraformer large offline",
     )
@@ -361,6 +371,25 @@ async def send(
         ]
         inputs[0].set_data_from_numpy(samples)
         inputs[1].set_data_from_numpy(lengths)
+        if model_name == "sensevoice":
+            language = np.array([[0]], dtype=np.int32)
+            text_norm = np.array([[15]], dtype=np.int32)
+            inputs.append(
+                protocol_client.InferInput(
+                    "LANGUAGE",
+                    language.shape,
+                    np_to_triton_dtype(np.int32),
+                )
+            )
+            inputs.append(
+                protocol_client.InferInput(
+                    "TEXT_NORM",
+                    text_norm.shape,
+                    np_to_triton_dtype(np.int32),
+                )
+            )
+            inputs[2].set_data_from_numpy(language)
+            inputs[3].set_data_from_numpy(text_norm)
         outputs = [protocol_client.InferRequestedOutput("TRANSCRIPTS")]
         sequence_id = 10086 + i
         start = time.time()
@@ -374,6 +403,9 @@ async def send(
         else:
             # For wenet
             decoding_results = decoding_results.decode("utf-8")
+        # remove special tokens in sensevoice results e.g. <|zh|><|NEUTRAL|><|Speech|><|woitn|>大学生利用漏洞免费吃肯德基祸刑
+        # <|*|>, using re
+        decoding_results = re.sub(r"<\|.*?\|>", "", decoding_results)
         end = time.time() - start
         latency_data.append((end, duration))
         total_duration += duration
