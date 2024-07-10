@@ -84,6 +84,7 @@ python3 client.py \
     --server-port 10086 \
     --model-name sensevoice \
     --num-tasks $num_task \
+    --batch-size $bach_size \
     --manifest-dir ./datasets/mini_zh
 """
 
@@ -247,6 +248,13 @@ def get_args():
         help="output of stats anaylasis in human readable format",
     )
 
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=1,
+        help="Inference batch_size per request for offline mode.",
+    )
+
     return parser.parse_args()
 
 
@@ -335,45 +343,63 @@ async def send(
     log_interval: int,
     compute_cer: bool,
     model_name: str,
-    padding_duration: int = 10,
+    padding_duration: int = 1,
+    batch_size: int = 1,
 ):
     total_duration = 0.0
     results = []
     latency_data = []
 
-    for i, dp in enumerate(dps):
-        if i % log_interval == 0:
-            print(f"{name}: {i}/{len(dps)}")
+    for batch_start in range(0, len(dps), batch_size):
+        batch_end = min(batch_start + batch_size, len(dps))
+        batch_dps = dps[batch_start:batch_end]
 
-        waveform, sample_rate = load_audio(dp["audio_filepath"])
-        duration = int(len(waveform) / sample_rate)
+        if batch_start % log_interval == 0:
+            print(f"{name}: {batch_start}/{len(dps)}")
 
-        # padding to nearset 10 seconds
-        samples = np.zeros(
-            (
-                1,
-                padding_duration * sample_rate * ((duration // padding_duration) + 1),
-            ),
-            dtype=np.float32,
+        batch_waveforms = []
+        batch_lengths = []
+
+        for dp in batch_dps:
+            waveform, sample_rate = load_audio(dp["audio_filepath"])
+            duration = int(len(waveform) / sample_rate)
+            total_duration += duration
+
+            batch_waveforms.append(waveform)
+            batch_lengths.append(len(waveform))
+        # pad the batch_waveforms to the same length
+        max_duration = max([len(w) / sample_rate for w in batch_waveforms])
+        padded_max_duration = int(
+            sample_rate * padding_duration * (max_duration // padding_duration + 1)
         )
 
-        samples[0, : len(waveform)] = waveform
+        for i in range(len(batch_waveforms)):
+            if len(batch_waveforms[i]) < padded_max_duration:
+                batch_waveforms[i] = np.pad(
+                    batch_waveforms[i],
+                    (0, padded_max_duration - len(batch_waveforms[i])),
+                    mode="constant",
+                    constant_values=0,
+                )
+                batch_waveforms[i] = batch_waveforms[i].astype(np.float32)
+        batch_waveforms = np.stack(batch_waveforms)
 
-        lengths = np.array([[len(waveform)]], dtype=np.int32)
+        batch_lengths = np.array(batch_lengths, dtype=np.int32).reshape(-1, 1)
 
         inputs = [
             protocol_client.InferInput(
-                "WAV", samples.shape, np_to_triton_dtype(samples.dtype)
+                "WAV", batch_waveforms.shape, np_to_triton_dtype(batch_waveforms.dtype)
             ),
             protocol_client.InferInput(
-                "WAV_LENS", lengths.shape, np_to_triton_dtype(lengths.dtype)
+                "WAV_LENS", batch_lengths.shape, np_to_triton_dtype(batch_lengths.dtype)
             ),
         ]
-        inputs[0].set_data_from_numpy(samples)
-        inputs[1].set_data_from_numpy(lengths)
+        inputs[0].set_data_from_numpy(batch_waveforms)
+        inputs[1].set_data_from_numpy(batch_lengths)
+
         if model_name == "sensevoice":
-            language = np.array([[0]], dtype=np.int32)
-            text_norm = np.array([[15]], dtype=np.int32)
+            language = np.zeros((batch_waveforms.shape[0], 1), dtype=np.int32)
+            text_norm = np.full((batch_waveforms.shape[0], 1), 15, dtype=np.int32)
             inputs.append(
                 protocol_client.InferInput(
                     "LANGUAGE",
@@ -390,40 +416,41 @@ async def send(
             )
             inputs[2].set_data_from_numpy(language)
             inputs[3].set_data_from_numpy(text_norm)
+
         outputs = [protocol_client.InferRequestedOutput("TRANSCRIPTS")]
-        sequence_id = 10086 + i
+        sequence_id = 10086 + batch_start
         start = time.time()
         response = await triton_client.infer(
             model_name, inputs, request_id=str(sequence_id), outputs=outputs
         )
 
-        decoding_results = response.as_numpy("TRANSCRIPTS")[0]
-        if type(decoding_results) == np.ndarray:
-            decoding_results = b" ".join(decoding_results).decode("utf-8")
-        else:
-            # For wenet
-            decoding_results = decoding_results.decode("utf-8")
-        # remove special tokens in sensevoice results e.g. <|zh|><|NEUTRAL|><|Speech|><|woitn|>大学生利用漏洞免费吃肯德基祸刑
-        # <|*|>, using re
-        decoding_results = re.sub(r"<\|.*?\|>", "", decoding_results)
-        end = time.time() - start
-        latency_data.append((end, duration))
-        total_duration += duration
+        decoding_results_batch = response.as_numpy("TRANSCRIPTS")
+        for i, decoding_results in enumerate(decoding_results_batch):
+            if type(decoding_results) == np.ndarray:
+                decoding_results = b" ".join(decoding_results).decode("utf-8")
+            else:
+                # For wenet
+                decoding_results = decoding_results.decode("utf-8")
+            # remove special tokens in sensevoice results e.g. <|zh|><|NEUTRAL|><|Speech|><|woitn|>大学生利用漏洞免费吃肯德基祸刑
+            # <|*|>, using re
+            decoding_results = re.sub(r"<\|.*?\|>", "", decoding_results)
+            end = time.time() - start
+            latency_data.append((end, duration))
 
-        if compute_cer:
-            ref = dp["text"].split()
-            hyp = decoding_results.split()
-            ref = list("".join(ref))
-            hyp = list("".join(hyp))
-            results.append((dp["id"], ref, hyp))
-        else:
-            results.append(
-                (
-                    dp["id"],
-                    dp["text"].split(),
-                    decoding_results.split(),
+            if compute_cer:
+                ref = batch_dps[i]["text"].split()
+                hyp = decoding_results.split()
+                ref = list("".join(ref))
+                hyp = list("".join(hyp))
+                results.append((batch_dps[i]["id"], ref, hyp))
+            else:
+                results.append(
+                    (
+                        batch_dps[i]["id"],
+                        batch_dps[i]["text"].split(),
+                        decoding_results.split(),
+                    )
                 )
-            )
 
     return total_duration, results, latency_data
 
@@ -740,6 +767,7 @@ async def main():
                         log_interval=args.log_interval,
                         compute_cer=args.compute_cer,
                         model_name=args.model_name,
+                        batch_size=args.batch_size,
                     )
                 )
         tasks.append(task)
