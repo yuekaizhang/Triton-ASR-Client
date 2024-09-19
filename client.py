@@ -75,7 +75,7 @@ python3 client.py \
     --server-addr localhost \
     --model-name whisper \
     --num-tasks $num_task \
-    --whisper-prompt "<|startoftranscript|><|en|><|transcribe|><|notimestamps|>" \
+    --text-prompt "<|startoftranscript|><|en|><|transcribe|><|notimestamps|>" \
     --manifest-dir ./datasets/mini_en
 
 # For offline sensevoice server
@@ -86,6 +86,14 @@ python3 client.py \
     --num-tasks $num_task \
     --batch-size $bach_size \
     --manifest-dir ./datasets/mini_zh
+
+# For offline whisper_qwen2 server
+python3 client.py \
+    --server-addr localhost \
+    --model-name infer_bls \
+    --num-tasks $num_task \
+    --manifest-dir ./datasets/mini_zh \
+    --compute-cer
 """
 
 import argparse
@@ -147,7 +155,7 @@ def get_args():
     )
 
     parser.add_argument(
-        "--whisper-prompt",
+        "--text-prompt",
         type=str,
         default="<|startoftranscript|><|en|><|transcribe|><|notimestamps|>",
         help="e.g. <|startofprev|>My hot words<|startoftranscript|><|en|><|transcribe|><|notimestamps|>, please check https://arxiv.org/pdf/2305.11095.pdf also.",
@@ -164,6 +172,7 @@ def get_args():
             "infer_pipeline",
             "whisper",
             "sensevoice",
+            "infer_bls",
         ],
         help="triton model_repo module name to request: transducer for k2, attention_rescoring for wenet offline, streaming_wenet for wenet streaming, infer_pipeline for paraformer large offline",
     )
@@ -744,7 +753,7 @@ async def main():
                 )
             )
         else:
-            if args.model_name == "whisper":
+            if args.model_name == "whisper" or args.model_name == "infer_bls":
                 task = asyncio.create_task(
                     send_whisper(
                         dps=dps_list[i],
@@ -754,7 +763,7 @@ async def main():
                         log_interval=args.log_interval,
                         compute_cer=args.compute_cer,
                         model_name=args.model_name,
-                        whisper_prompt=args.whisper_prompt,
+                        whisper_prompt=args.text_prompt,
                     )
                 )
             else:
