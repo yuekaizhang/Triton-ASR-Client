@@ -250,11 +250,11 @@ def get_args():
     )
 
     parser.add_argument(
-        "--stats_file",
+        "--log-dir",
         type=str,
         required=False,
-        default="./stats_summary.txt",
-        help="output of stats anaylasis in human readable format",
+        default="./tmp",
+        help="log directory",
     )
 
     parser.add_argument(
@@ -812,26 +812,25 @@ async def main():
     s += f"average_latency_ms: {latency_ms:.2f}\n"
 
     print(s)
-
-    with open("rtf.txt", "w") as f:
+    os.makedirs(args.log_dir, exist_ok=True)
+    with open(f"{args.log_dir}/rtf.txt", "w") as f:
         f.write(s)
 
     name = Path(args.manifest_dir).stem.split(".")[0]
     results = sorted(results)
-    store_transcripts(filename=f"recogs-{name}.txt", texts=results)
+    store_transcripts(filename=f"{args.log_dir}/recogs-{name}.txt", texts=results)
 
-    with open(f"errs-{name}.txt", "w") as f:
+    with open(f"{args.log_dir}/errs-{name}.txt", "w") as f:
         write_error_stats(f, "test-set", results, enable_log=True)
 
-    with open(f"errs-{name}.txt", "r") as f:
+    with open(f"{args.log_dir}/errs-{name}.txt", "r") as f:
         print(f.readline())  # WER
         print(f.readline())  # Detailed errors
 
-    if args.stats_file:
-        stats = await triton_client.get_inference_statistics(
-            model_name="", as_json=True
-        )
-        write_triton_stats(stats, args.stats_file)
+    stats = await triton_client.get_inference_statistics(
+        model_name="", as_json=True
+    )
+    write_triton_stats(stats, f"{args.log_dir}/stats_summary.txt")
 
 
 if __name__ == "__main__":
