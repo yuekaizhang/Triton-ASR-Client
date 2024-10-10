@@ -107,7 +107,7 @@ import types
 from pathlib import Path
 
 import numpy as np
-import soundfile
+import soundfile as sf
 import tritonclient
 import tritonclient.grpc.aio as grpcclient
 from tritonclient.utils import np_to_triton_dtype
@@ -337,12 +337,18 @@ def split_data(data, k):
 
     return result
 
-
 def load_audio(wav_path):
-    waveform, sample_rate = soundfile.read(wav_path)
-    assert sample_rate == 16000, f"Only support 16k sample rate, but got {sample_rate}"
-    return waveform, sample_rate
-
+    waveform, sample_rate = sf.read(wav_path)
+    if sample_rate == 16000:
+        return waveform, sample_rate
+    elif sample_rate == 8000:
+        from scipy.signal import resample
+        # Upsample from 8k to 16k
+        num_samples = int(len(waveform) * (16000 / 8000))
+        upsampled_waveform = resample(waveform, num_samples)
+        return upsampled_waveform, 16000
+    else:
+        raise ValueError(f"Only support 8k and 16k sample rates, but got {sample_rate}")
 
 async def send(
     dps: list,
@@ -813,10 +819,9 @@ async def main():
 
     print(s)
     os.makedirs(args.log_dir, exist_ok=True)
-    with open(f"{args.log_dir}/rtf.txt", "w") as f:
-        f.write(s)
-
     name = Path(args.manifest_dir).stem.split(".")[0]
+    with open(f"{args.log_dir}/rtf-{name}.txt", "w") as f:
+        f.write(s)
     results = sorted(results)
     store_transcripts(filename=f"{args.log_dir}/recogs-{name}.txt", texts=results)
 
@@ -830,7 +835,7 @@ async def main():
     stats = await triton_client.get_inference_statistics(
         model_name="", as_json=True
     )
-    write_triton_stats(stats, f"{args.log_dir}/stats_summary.txt")
+    write_triton_stats(stats, f"{args.log_dir}/stats_summary-{name}.txt")
 
 
 if __name__ == "__main__":
