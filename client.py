@@ -94,6 +94,22 @@ python3 client.py \
     --num-tasks $num_task \
     --manifest-dir ./datasets/mini_zh \
     --compute-cer
+
+# huggingface dataset
+dataset_name=yuekai/aishell
+subset_name=test
+split_name=test
+num_task=32
+python3 client.py \
+    --server-addr localhost \
+    --model-name infer_bls \
+    --num-tasks $num_task \
+    --text-prompt "<|startoftranscript|><|zh|><|transcribe|><|notimestamps|>" \
+    --huggingface_dataset $dataset_name \
+    --subset_name $subset_name \
+    --split_name $split_name \
+    --log-dir ./log_sherpa_multi_hans_whisper_large_ifb_$num_task \
+    --compute-cer
 """
 
 import argparse
@@ -171,6 +187,7 @@ def get_args():
             "streaming_wenet",
             "infer_pipeline",
             "whisper",
+            "whisper_bls",
             "sensevoice",
             "infer_bls",
         ],
@@ -264,6 +281,19 @@ def get_args():
         help="Inference batch_size per request for offline mode.",
     )
 
+    parser.add_argument("--huggingface_dataset", type=str, default=None)
+    parser.add_argument(
+        "--subset_name",
+        type=str,
+        default=None,
+        help="dataset configuration name in the dataset, see https://huggingface.co/docs/datasets/v3.0.0/en/package_reference/loading_methods#datasets.load_dataset",
+    )
+    parser.add_argument(
+        "--split_name",
+        type=str,
+        default="test",
+        help="dataset split name, default is 'test'",
+    )
     return parser.parse_args()
 
 
@@ -337,18 +367,21 @@ def split_data(data, k):
 
     return result
 
+
 def load_audio(wav_path):
     waveform, sample_rate = sf.read(wav_path)
     if sample_rate == 16000:
         return waveform, sample_rate
     elif sample_rate == 8000:
         from scipy.signal import resample
+
         # Upsample from 8k to 16k
         num_samples = int(len(waveform) * (16000 / 8000))
         upsampled_waveform = resample(waveform, num_samples)
         return upsampled_waveform, 16000
     else:
         raise ValueError(f"Only support 8k and 16k sample rates, but got {sample_rate}")
+
 
 async def send(
     dps: list,
@@ -358,7 +391,7 @@ async def send(
     log_interval: int,
     compute_cer: bool,
     model_name: str,
-    padding_duration: int = 1,
+    padding_duration: int = 10,
     batch_size: int = 1,
 ):
     total_duration = 0.0
@@ -377,7 +410,7 @@ async def send(
 
         for dp in batch_dps:
             waveform, sample_rate = load_audio(dp["audio_filepath"])
-            duration = int(len(waveform) / sample_rate)
+            duration = len(waveform) / sample_rate
             total_duration += duration
 
             batch_waveforms.append(waveform)
@@ -492,7 +525,7 @@ async def send_streaming(
             print(f"{name}: {i}/{len(dps)}")
 
         waveform, sample_rate = load_audio(dp["audio_filepath"])
-        duration = int(len(waveform) / sample_rate)
+        duration = len(waveform) / sample_rate
 
         wav_segs = []
 
@@ -594,7 +627,7 @@ async def send_whisper(
     log_interval: int,
     compute_cer: bool,
     model_name: str,
-    padding_duration: int = 10,
+    padding_duration: int = 30,
     whisper_prompt: str = "<|startoftranscript|><|en|><|transcribe|><|notimestamps|>",
 ):
     total_duration = 0.0
@@ -606,13 +639,15 @@ async def send_whisper(
             print(f"{name}: {i}/{len(dps)}")
 
         waveform, sample_rate = load_audio(dp["audio_filepath"])
-        duration = int(len(waveform) / sample_rate)
+        duration = len(waveform) / sample_rate
 
         # padding to nearset 10 seconds
         samples = np.zeros(
             (
                 1,
-                padding_duration * sample_rate * ((duration // padding_duration) + 1),
+                padding_duration
+                * sample_rate
+                * ((int(duration) // padding_duration) + 1),
             ),
             dtype=np.float32,
         )
@@ -625,13 +660,17 @@ async def send_whisper(
             protocol_client.InferInput(
                 "WAV", samples.shape, np_to_triton_dtype(samples.dtype)
             ),
+            protocol_client.InferInput(
+                "WAV_LENS", lengths.shape, np_to_triton_dtype(lengths.dtype)
+            ),
             protocol_client.InferInput("TEXT_PREFIX", [1, 1], "BYTES"),
         ]
         inputs[0].set_data_from_numpy(samples)
+        inputs[1].set_data_from_numpy(lengths)
 
         input_data_numpy = np.array([whisper_prompt], dtype=object)
         input_data_numpy = input_data_numpy.reshape((1, 1))
-        inputs[1].set_data_from_numpy(input_data_numpy)
+        inputs[2].set_data_from_numpy(input_data_numpy)
 
         outputs = [protocol_client.InferRequestedOutput("TRANSCRIPTS")]
         sequence_id = 100000000 + i + task_id * 10
@@ -683,6 +722,28 @@ async def main():
                 }
             ]
         ]
+    elif args.huggingface_dataset:
+        import datasets
+
+        dataset = datasets.load_dataset(
+            args.huggingface_dataset,
+            args.subset_name,
+            split=args.split_name,
+            trust_remote_code=True,
+        )
+        dps_list = []
+        for i in range(len(dataset)):
+            print(dataset[i])
+            assert dataset[i]["audio"]["sampling_rate"] == 16000
+            dps_list.append(
+                {
+                    "audio_filepath": dataset[i]["audio"]["path"],
+                    "text": dataset[i]["text"],
+                    "id": dataset[i]["segment_id"],
+                }
+            )
+        dps_list = split_data(dps_list, args.num_tasks)
+        args.num_tasks = min(args.num_tasks, len(dps_list))
     else:
         if not any(Path(args.manifest_dir).rglob("*.wav")):
             if args.manifest_dir == DEFAULT_MANIFEST_DIR:
@@ -759,7 +820,7 @@ async def main():
                 )
             )
         else:
-            if args.model_name == "whisper" or args.model_name == "infer_bls":
+            if "whisper" in args.model_name or args.model_name == "infer_bls":
                 task = asyncio.create_task(
                     send_whisper(
                         dps=dps_list[i],
@@ -832,9 +893,7 @@ async def main():
         print(f.readline())  # WER
         print(f.readline())  # Detailed errors
 
-    stats = await triton_client.get_inference_statistics(
-        model_name="", as_json=True
-    )
+    stats = await triton_client.get_inference_statistics(model_name="", as_json=True)
     write_triton_stats(stats, f"{args.log_dir}/stats_summary-{name}.txt")
 
 
