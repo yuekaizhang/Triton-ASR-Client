@@ -629,81 +629,108 @@ async def send_whisper(
     model_name: str,
     padding_duration: int = 30,
     whisper_prompt: str = "<|startoftranscript|><|en|><|transcribe|><|notimestamps|>",
+    batch_size: int = 1,
 ):
     total_duration = 0.0
     results = []
     latency_data = []
     task_id = int(name[5:])
-    for i, dp in enumerate(dps):
-        if i % log_interval == 0:
-            print(f"{name}: {i}/{len(dps)}")
 
-        waveform, sample_rate = load_audio(dp["audio_filepath"])
-        duration = len(waveform) / sample_rate
+    for batch_start in range(0, len(dps), batch_size):
+        batch_end = min(batch_start + batch_size, len(dps))
+        batch_dps = dps[batch_start:batch_end]
 
-        # padding to nearset 10 seconds
-        samples = np.zeros(
-            (
-                1,
-                padding_duration
-                * sample_rate
-                * ((int(duration) // padding_duration) + 1),
-            ),
-            dtype=np.float32,
+        if batch_start % log_interval == 0:
+            print(f"{name}: {batch_start}/{len(dps)}")
+
+        batch_waveforms = []
+        batch_lengths = []
+
+        # Load audio for each item in the batch
+        for dp in batch_dps:
+            waveform, sample_rate = load_audio(dp["audio_filepath"])
+            duration = len(waveform) / sample_rate
+            total_duration += duration
+            batch_waveforms.append(waveform)
+            batch_lengths.append(len(waveform))
+
+        # Calculate max length in batch and apply padding
+        max_duration = max([len(w) / sample_rate for w in batch_waveforms])
+        padded_max_duration = int(
+            sample_rate
+            * padding_duration
+            * ((int(max_duration) // padding_duration) + 1)
         )
 
-        samples[0, : len(waveform)] = waveform
+        # Apply padding
+        padded_waveforms = []
+        for waveform in batch_waveforms:
+            if len(waveform) < padded_max_duration:
+                padded_waveform = np.zeros(padded_max_duration, dtype=np.float32)
+                padded_waveform[: len(waveform)] = waveform
+                padded_waveforms.append(padded_waveform)
+            else:
+                padded_waveforms.append(waveform.astype(np.float32))
 
-        lengths = np.array([[len(waveform)]], dtype=np.int32)
+        # Prepare batch data
+        batch_waveforms = np.stack(padded_waveforms)
+        batch_lengths = np.array(batch_lengths, dtype=np.int32).reshape(-1, 1)
 
+        # Prepare Whisper prompt batch
+        prompt_batch = np.array([whisper_prompt] * len(batch_dps), dtype=object)
+        prompt_batch = prompt_batch.reshape((-1, 1))
+
+        # Prepare input tensors
         inputs = [
             protocol_client.InferInput(
-                "WAV", samples.shape, np_to_triton_dtype(samples.dtype)
+                "WAV", batch_waveforms.shape, np_to_triton_dtype(batch_waveforms.dtype)
             ),
             protocol_client.InferInput(
-                "WAV_LENS", lengths.shape, np_to_triton_dtype(lengths.dtype)
+                "WAV_LENS", batch_lengths.shape, np_to_triton_dtype(batch_lengths.dtype)
             ),
-            protocol_client.InferInput("TEXT_PREFIX", [1, 1], "BYTES"),
+            protocol_client.InferInput(
+                "TEXT_PREFIX", list(prompt_batch.shape), "BYTES"
+            ),
         ]
-        inputs[0].set_data_from_numpy(samples)
-        inputs[1].set_data_from_numpy(lengths)
-
-        input_data_numpy = np.array([whisper_prompt], dtype=object)
-        input_data_numpy = input_data_numpy.reshape((1, 1))
-        inputs[2].set_data_from_numpy(input_data_numpy)
+        inputs[0].set_data_from_numpy(batch_waveforms)
+        inputs[1].set_data_from_numpy(batch_lengths)
+        inputs[2].set_data_from_numpy(prompt_batch)
 
         outputs = [protocol_client.InferRequestedOutput("TRANSCRIPTS")]
-        sequence_id = 100000000 + i + task_id * 10
+        sequence_id = 100000000 + batch_start + task_id * 10
+
+        # Batch inference
         start = time.time()
         response = await triton_client.infer(
             model_name, inputs, request_id=str(sequence_id), outputs=outputs
         )
-
-        decoding_results = response.as_numpy("TRANSCRIPTS")[0]
-        if type(decoding_results) == np.ndarray:
-            decoding_results = b" ".join(decoding_results).decode("utf-8")
-        else:
-            # For wenet
-            decoding_results = decoding_results.decode("utf-8")
         end = time.time() - start
-        latency_data.append((end, duration))
-        total_duration += duration
 
-        if compute_cer:
-            ref = dp["text"].split()
-            hyp = decoding_results.split()
-            ref = list("".join(ref))
-            hyp = list("".join(hyp))
-            results.append((dp["id"], ref, hyp))
-        else:
-            results.append(
-                (
-                    dp["id"],
-                    dp["text"].split(),
-                    decoding_results.split(),
+        # Decode outputs
+        decoding_results_batch = response.as_numpy("TRANSCRIPTS")
+        for i, decoding_results in enumerate(decoding_results_batch):
+            duration = len(batch_waveforms[i]) / sample_rate
+            if isinstance(decoding_results, np.ndarray):
+                decoding_results = b" ".join(decoding_results).decode("utf-8")
+            else:
+                decoding_results = decoding_results.decode("utf-8")
+
+            latency_data.append((end, duration))
+
+            if compute_cer:
+                ref = batch_dps[i]["text"].split()
+                hyp = decoding_results.split()
+                ref = list("".join(ref))
+                hyp = list("".join(hyp))
+                results.append((batch_dps[i]["id"], ref, hyp))
+            else:
+                results.append(
+                    (
+                        batch_dps[i]["id"],
+                        batch_dps[i]["text"].split(),
+                        decoding_results.split(),
+                    )
                 )
-            )
-        print(results[-1])
 
     return total_duration, results, latency_data
 
@@ -831,6 +858,7 @@ async def main():
                         compute_cer=args.compute_cer,
                         model_name=args.model_name,
                         whisper_prompt=args.text_prompt,
+                        batch_size=args.batch_size,
                     )
                 )
             else:
