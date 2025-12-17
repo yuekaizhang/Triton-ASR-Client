@@ -190,6 +190,7 @@ def get_args():
             "whisper_bls",
             "sensevoice",
             "infer_bls",
+            "fireredasr",
         ],
         help="triton model_repo module name to request: transducer for k2, attention_rescoring for wenet offline, streaming_wenet for wenet streaming, infer_pipeline for paraformer large offline",
     )
