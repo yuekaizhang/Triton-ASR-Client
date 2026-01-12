@@ -191,6 +191,7 @@ def get_args():
             "sensevoice",
             "infer_bls",
             "fireredasr",
+            "funasr",
         ],
         help="triton model_repo module name to request: transducer for k2, attention_rescoring for wenet offline, streaming_wenet for wenet streaming, infer_pipeline for paraformer large offline",
     )
@@ -294,6 +295,12 @@ def get_args():
         type=str,
         default="test",
         help="dataset split name, default is 'test'",
+    )
+    parser.add_argument(
+        "--enable_text_normalization",
+        action="store_true",
+        default=False,
+        help="enable text normalization",
     )
     return parser.parse_args()
 
@@ -914,6 +921,26 @@ async def main():
         f.write(s)
     results = sorted(results)
     store_transcripts(filename=f"{args.log_dir}/recogs-{name}.txt", texts=results)
+
+    if args.enable_text_normalization:
+        # pip install WeTextProcessing
+        from tn.chinese.normalizer import Normalizer as ZhNormalizer
+        # text normlize
+        zh_tn_model = ZhNormalizer(
+            cache_dir="./cache",
+            remove_erhua=False,
+            remove_interjections=False,
+            remove_puncts=True,
+            overwrite_cache=False,
+        )
+        new_results = []
+        for i in range(len(results)):
+            hyp = "".join(results[i][2])
+            ref = "".join(results[i][1])
+            hyp = zh_tn_model.normalize(hyp).upper()
+            ref = zh_tn_model.normalize(ref).upper()
+            new_results.append((results[i][0], list(ref), list(hyp)))
+        results = new_results
 
     with open(f"{args.log_dir}/errs-{name}.txt", "w") as f:
         write_error_stats(f, "test-set", results, enable_log=True)

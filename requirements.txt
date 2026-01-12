@@ -1,5 +1,6 @@
 kaldialign
-tritonclient[grpc]==2.31
+tritonclient[all]
 soundfile
 numpy
 scipy
+datasets==3.1.0
